@@ -86,34 +86,98 @@
     </div>
 
     <script>
+        // Google Sheets API configuration
+        const SPREADSHEET_ID = '1qvv1O26yDS0LMfRYNnaiZ82rquADsUAAElDrGNp9pJc';  // Replace with your sheet ID
+        const API_KEY = 'AIzaSyDvNPSejVwy-2apf-aG-SNDIDMmYPqM63I';        // Replace with your API key
+        const CLIENT_ID = '963600232288-5rlnbgkj7ro6shthdkdbejplqr0ljt2c.apps.googleusercontent.com'
+        const SHEET_NAME = 'Sheet1';            // Replace with the name of the sheet you're using.
+
         let members = [];
+        let totalTeamGoal = 0;
+        let totalDistanceRun = 0;
 
         function initApp() {
             loadMembers();
-            renderMemberList();
             addEventListeners();
-        }
-
-        function loadMembers() {
-            const storedMembers = localStorage.getItem('runningChallengeMembers');
-            if (storedMembers) {
-                try {
-                    members = JSON.parse(storedMembers);
-                } catch (error) {
-                    console.error('Error parsing stored members:', error);
-                    members = [];
-                    showToast('Error: Could not load saved data. Starting fresh.', 'error');
-                }
-            }
-        }
-
-        function saveMembers() {
-            localStorage.setItem('runningChallengeMembers', JSON.stringify(members));
         }
 
         function addEventListeners() {
             const addMemberButton = document.getElementById('add-member-button');
             addMemberButton.addEventListener('click', addMember);
+        }
+
+        function loadMembers() {
+            const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${SHEET_NAME}?key=${API_KEY}`;
+
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        console.error('Error loading data from Google Sheets:', data.error);
+                        showToast('Error loading data. Please check your Google Sheets setup.', 'error');
+                        return;
+                    }
+
+                    const headerRow = data.values[0];
+                    const nameIndex = headerRow.indexOf('Name');
+                    const goalIndex = headerRow.indexOf('Goal');
+                    const runsIndex = headerRow.indexOf('Runs');
+                    const totalDistanceIndex = headerRow.indexOf('TotalDistance');
+
+                    if (nameIndex === -1 || goalIndex === -1 || runsIndex === -1 || totalDistanceIndex === -1) {
+                        console.error('Error: Required headers not found in Google Sheet.');
+                        showToast('Error: Required headers are missing in the Google Sheet.  Please check that  "Name", "Goal", "Runs", and "TotalDistance" are in the first row.', 'error');
+                        return;
+                    }
+
+                    members = [];
+                    totalTeamGoal = 0;
+                    totalDistanceRun = 0;
+                    // Start from the second row (index 1) to skip the header row
+                    for (let i = 1; i < data.values.length; i++) {
+                        const row = data.values[i];
+                        const name = row[nameIndex];
+                        const goal = parseFloat(row[goalIndex]) || 0;
+                        const runs = row[runsIndex] ? row[runsIndex].split(',').map(Number).filter(n => !isNaN(n)) : [];
+                        const totalDistance = parseFloat(row[totalDistanceIndex]) || 0;
+
+                        members.push({ name, goal, runs, totalDistance });
+                        totalTeamGoal += goal;
+                        totalDistanceRun += totalDistance;
+                    }
+                    renderMemberList();
+                    updateTeamSummary();
+                })
+                .catch(error => {
+                    console.error('Error fetching data from Google Sheets:', error);
+                    showToast('Error fetching data.  Please check your internet connection and Google Sheets API settings.', 'error');
+                });
+        }
+
+        function updateSheet(range, values) {
+            const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${range}?valueInputOption=USER_ENTERED&key=${API_KEY}`;
+
+            fetch(url, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${getAccessToken()}` // Use the access token
+                },
+                body: JSON.stringify({ values })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    console.error('Error updating Google Sheets:', data.error);
+                    showToast('Error updating data in Google Sheets.', 'error');
+                } else {
+                    loadMembers(); // Reload data after successful update
+                }
+            })
+            .catch(error => {
+                console.error('Error updating Google Sheets:', error);
+                showToast('Error updating data. Please check your internet connection and Google Sheets API settings.', 'error');
+            });
         }
 
         function addMember() {
@@ -127,21 +191,26 @@
                 return;
             }
 
-            const newMember = {
-                name: name,
-                goal: goal,
-                runs: [],
-                totalDistance: 0
-            };
+            // Find the last row in the sheet
+            const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${SHEET_NAME}?key=${API_KEY}`;
+             fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    const nextRow = data.values ? data.values.length : 1; // Determine the next empty row
+                    const range = `${SHEET_NAME}!A${nextRow}:D${nextRow}`; // Add to the next row
+                    const values = [[name, goal, '', 0]];  // Initial values for the new member
 
-            members.push(newMember);
-            saveMembers();
-            renderMemberList();
-            updateTeamSummary();
-            nameInput.value = '';
-            goalInput.value = '';
-            showToast(`Member "${name}" added successfully!`, 'success');
+                    updateSheet(range, { values }); // Add the member to the sheet
+                    nameInput.value = '';
+                    goalInput.value = '';
+                })
+               .catch(error => {
+                    console.error('Error finding last row:', error);
+                    showToast('Error adding member. Please check your internet connection and Google Sheets API settings.', 'error');
+                });
         }
+
+
 
         function addRun(memberIndex) {
             const member = members[memberIndex];
@@ -152,13 +221,14 @@
                 showToast('Please enter a valid distance (greater than 0).', 'warning');
                 return;
             }
-
             member.runs.push(distance);
             member.totalDistance += distance;
-            saveMembers();
-            renderMemberList();
-            updateTeamSummary();
-            showToast(`Run of ${distance} km added for ${member.name}!`, 'success');
+
+             // Find the row number for the member
+            const rowIndex = members.findIndex(m => m.name === member.name) + 2; // +2 because of header row and 0-based index
+            const range = `${SHEET_NAME}!C${rowIndex}:D${rowIndex}`;
+            const values = [[member.runs.join(','), member.totalDistance]];
+            updateSheet(range, {values});
             runDistanceInput.value = '';
         }
 
@@ -185,6 +255,7 @@
                 memberDiv.innerHTML = memberContent;
                 memberListContainer.appendChild(memberDiv);
             });
+            updateTeamSummary()
         }
 
         function updateTeamSummary() {
@@ -193,8 +264,8 @@
             const teamProgressBar = document.getElementById('team-progress-bar');
             const teamProgressPercentageElement = document.getElementById('team-progress-percentage');
 
-            const totalTeamGoal = members.reduce((sum, member) => sum + member.goal, 0);
-            const totalDistanceRun = members.reduce((sum, member) => sum + member.totalDistance, 0);
+            totalTeamGoal = members.reduce((sum, member) => sum + member.goal, 0);
+            totalDistanceRun = members.reduce((sum, member) => sum + member.totalDistance, 0);
 
             totalTeamGoalElement.textContent = `${totalTeamGoal.toFixed(2)} km`;
             totalDistanceRunElement.textContent = `${totalDistanceRun.toFixed(2)} km`;
@@ -216,6 +287,58 @@
                 setTimeout(() => toast.remove(), 500);
             }, 2000);
         }
+        let accessToken;
+        function getAccessToken() {
+          if (accessToken) {
+            return accessToken;
+          }
+
+          // Replace with your actual OAuth 2.0 configuration
+            const CLIENT_ID = 'YOUR_CLIENT_ID'; //  Use the Client ID from the OAuth 2.0 credentials.
+            const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
+            const REDIRECT_URI = 'https://yourusername.github.io';  // Or the URL where you host the application.
+
+          const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CLIENT_ID}&response_type=token&scope=${SCOPES.join(' ')}&redirect_uri=${REDIRECT_URI}`;
+
+          const popup = window.open(authUrl, {width: 500, height: 600});
+
+          return new Promise((resolve, reject) => {
+            const interval = setInterval(() => {
+              try {
+                if (popup.location.href.startsWith(REDIRECT_URI)) {
+                  clearInterval(interval);
+                  const hash = popup.location.hash;
+                  if (hash) {
+                    const params = new URLSearchParams(hash.substring(1));
+                    accessToken = params.get('access_token');
+                    if (accessToken) {
+                      resolve(accessToken);
+                      popup.close();
+                    } else {
+                         const error = params.get('error');
+                         reject(new Error(`Failed to get access token: ${error}`));
+                         popup.close();
+                    }
+
+                  } else {
+                    reject(new Error('Failed to receive access token.  No hash found.'));
+                    popup.close();
+                  }
+                }
+              } catch (e) {
+                // Ignore cross-origin error, wait for redirect
+              }
+            }, 100);
+          });
+        }
+
+        //Example Usage
+        getAccessToken().then(token => {
+            //Use the token
+            console.log(token)
+        }).catch(error =>{
+            console.error(error)
+        })
 
         initApp();
     </script>

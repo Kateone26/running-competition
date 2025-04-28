@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Running Challenge Tracker</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/@tailwindcss/browser@latest"></script>
+    <style>
+        /* Custom styles for toast messages */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background-color: #4caf50;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            font-size: 1rem;
+            z-index: 1000;
+            opacity: 1;
+            transition: opacity 0.5s ease-in-out, transform 0.5s ease-in-out;
+        }
+
+        .toast-warning {
+            background-color: #f39c12;
+        }
+
+        .toast-info {
+            background-color: #3498db;
+        }
+
+        .toast-success {
+            background-color: #2ecc71;
+        }
+
+        .toast.fade-out {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-inter">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8">
+        <h1 class="text-2xl sm:text-3xl lg:text-4xl font-semibold text-blue-600 text-center mb-6">Running Challenge Tracker</h1>
+
+        <div id="member-list" class="mb-6 space-y-4">
+            </div>
+
+        <div id="add-member-form" class="bg-white rounded-lg shadow-md p-4 sm:p-6 mb-6">
+            <h2 class="text-lg sm:text-xl font-semibold text-gray-800 mb-4">Add New Member</h2>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <label for="member-name" class="block text-gray-700 text-sm font-bold mb-2">Name:</label>
+                    <input type="text" id="member-name" placeholder="Enter member name" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+                </div>
+                <div>
+                    <label for="member-goal" class="block text-gray-700 text-sm font-bold mb-2">Goal (km):</label>
+                    <input type="number" id="member-goal" placeholder="Enter km goal" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+                </div>
+            </div>
+            <button id="add-member-button" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline mt-4 w-full sm:w-auto">Add Member</button>
+        </div>
+
+        <div id="team-summary" class="bg-white rounded-lg shadow-md p-4 sm:p-6 mb-6">
+            <h2 class="text-lg sm:text-xl font-semibold text-gray-800 mb-4">Team Summary</h2>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <p class="text-gray-700 font-medium">Total Team Goal:</p>
+                    <p id="total-team-goal" class="text-xl sm:text-2xl font-bold text-blue-600">0 km</p>
+                </div>
+                <div>
+                    <p class="text-gray-700 font-medium">Total Distance Run:</p>
+                    <p id="total-distance-run" class="text-xl sm:text-2xl font-bold text-green-600">0 km</p>
+                </div>
+                <div>
+                    <p class="text-gray-700 font-medium">Team Progress:</p>
+                    <div class="bg-gray-200 rounded-full h-2.5">
+                        <div id="team-progress-bar" class="bg-blue-500 h-2.5 rounded-full" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                    </div>
+                    <p id="team-progress-percentage" class="text-sm text-gray-500 mt-1">0%</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let members = [];
+
+        function initApp() {
+            loadMembers();
+            renderMemberList();
+            addEventListeners();
+        }
+
+        function loadMembers() {
+            const storedMembers = localStorage.getItem('runningChallengeMembers');
+            if (storedMembers) {
+                try {
+                    members = JSON.parse(storedMembers);
+                } catch (error) {
+                    console.error('Error parsing stored members:', error);
+                    members = [];
+                    showToast('Error: Could not load saved data. Starting fresh.', 'error');
+                }
+            }
+        }
+
+        function saveMembers() {
+            localStorage.setItem('runningChallengeMembers', JSON.stringify(members));
+        }
+
+        function addEventListeners() {
+            const addMemberButton = document.getElementById('add-member-button');
+            addMemberButton.addEventListener('click', addMember);
+        }
+
+        function addMember() {
+            const nameInput = document.getElementById('member-name');
+            const goalInput = document.getElementById('member-goal');
+            const name = nameInput.value.trim();
+            const goal = parseFloat(goalInput.value);
+
+            if (name === '' || isNaN(goal) || goal <= 0) {
+                showToast('Please enter a valid name and goal (greater than 0).', 'warning');
+                return;
+            }
+
+            const newMember = {
+                name: name,
+                goal: goal,
+                runs: [],
+                totalDistance: 0
+            };
+
+            members.push(newMember);
+            saveMembers();
+            renderMemberList();
+            updateTeamSummary();
+            nameInput.value = '';
+            goalInput.value = '';
+            showToast(`Member "${name}" added successfully!`, 'success');
+        }
+
+        function addRun(memberIndex) {
+            const member = members[memberIndex];
+            const runDistanceInput = document.getElementById(`run-distance-${memberIndex}`);
+            const distance = parseFloat(runDistanceInput.value);
+
+            if (isNaN(distance) || distance <= 0) {
+                showToast('Please enter a valid distance (greater than 0).', 'warning');
+                return;
+            }
+
+            member.runs.push(distance);
+            member.totalDistance += distance;
+            saveMembers();
+            renderMemberList();
+            updateTeamSummary();
+            showToast(`Run of ${distance} km added for ${member.name}!`, 'success');
+            runDistanceInput.value = '';
+        }
+
+        function renderMemberList() {
+            const memberListContainer = document.getElementById('member-list');
+            memberListContainer.innerHTML = '';
+
+            members.forEach((member, index) => {
+                const memberDiv = document.createElement('div');
+                memberDiv.classList.add('bg-white', 'rounded-lg', 'shadow-md', 'p-4', 'sm:p-6');
+
+                const memberContent = `
+                    <h3 class="text-lg sm:text-xl font-semibold text-gray-800 mb-2">${member.name}</h3>
+                    <p class="text-gray-600">Goal: <span class="font-semibold text-blue-500">${member.goal} km</span></p>
+                    <p class="text-gray-600">Total Distance: <span class="font-semibold text-green-500">${member.totalDistance.toFixed(2)} km</span></p>
+                    <div class="mb-4">
+                        <label for="run-distance-${index}" class="block text-gray-700 text-sm font-bold mb-2">Distance (km):</label>
+                        <div class="flex space-x-2">
+                            <input type="number" id="run-distance-${index}" placeholder="Enter distance" class="shadow appearance-none border rounded w-full sm:w-auto py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+                            <button onclick="addRun(${index})" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">Add Run</button>
+                        </div>
+                    </div>
+                `;
+                memberDiv.innerHTML = memberContent;
+                memberListContainer.appendChild(memberDiv);
+            });
+        }
+
+        function updateTeamSummary() {
+            const totalTeamGoalElement = document.getElementById('total-team-goal');
+            const totalDistanceRunElement = document.getElementById('total-distance-run');
+            const teamProgressBar = document.getElementById('team-progress-bar');
+            const teamProgressPercentageElement = document.getElementById('team-progress-percentage');
+
+            const totalTeamGoal = members.reduce((sum, member) => sum + member.goal, 0);
+            const totalDistanceRun = members.reduce((sum, member) => sum + member.totalDistance, 0);
+
+            totalTeamGoalElement.textContent = `${totalTeamGoal.toFixed(2)} km`;
+            totalDistanceRunElement.textContent = `${totalDistanceRun.toFixed(2)} km`;
+
+            const progress = totalTeamGoal > 0 ? (totalDistanceRun / totalTeamGoal) * 100 : 0;
+            teamProgressBar.style.width = `${progress.toFixed(2)}%`;
+            teamProgressBar.setAttribute('aria-valuenow', progress.toFixed(2));
+            teamProgressPercentageElement.textContent = `${progress.toFixed(2)}%`;
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+
+            setTimeout(() => {
+                toast.classList.add('fade-out');
+                setTimeout(() => toast.remove(), 500);
+            }, 2000);
+        }
+
+        initApp();
+    </script>
+</body>
+</html>
